@@ -69,6 +69,10 @@ Critical Threshhold
 
 Warn Threshhold
 
+    -v VERBOSE, --verbose=VERBOSE
+
+verbose Level (2 => Log API Request, 3 => Log also API Response)
+
 ## Examples
 
     $ ./check_azure_resource.py \
