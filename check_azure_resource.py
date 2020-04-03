@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <http://www.gnu.org/licenses/>.
 
+import logging as log
+import logging.config
 
 from msrest.exceptions import ClientException
 from msrest.service_client import ServiceClient
@@ -42,6 +44,8 @@ def _call_arm_rest_api(client, path, api_version, method='GET', body=None, query
         timeout=timeout
     )
 
+    log.info("Request URL : \n{0}\n".format(request.url))
+
     try:
         response.raise_for_status()
     except HTTPError:
@@ -54,6 +58,8 @@ def _call_arm_rest_api(client, path, api_version, method='GET', body=None, query
     except ValueError:
         result = response.text
 
+    log.debug("Response : \n{0}\n".format(result))
+
     return result
 
 
@@ -61,6 +67,7 @@ class NagiosAzureResourceMonitor(Plugin):
     """Implements functionalities to grab metrics from Azure resource objects."""
 
     DEFAULT_AZURE_SERVICE_HOST = 'management.azure.com'
+    #_AZURE_METRICS_API = '2017-05-01-preview'
     _AZURE_METRICS_API = '2018-01-01'
     _AZURE_METRICS_UNIT_SYMBOLS = {'Percent': '%', 'Bytes': 'B', 'Seconds': 's'}
 
@@ -68,6 +75,7 @@ class NagiosAzureResourceMonitor(Plugin):
         Plugin.__init__(self, *args, **kwargs)
 
         self._set_cli_options()
+        #self._load_config()
 
     def _set_cli_options(self):
         """Define command line options."""
@@ -84,6 +92,9 @@ class NagiosAzureResourceMonitor(Plugin):
     def activate(self):
         """Parse out all command line options and get ready to process the plugin."""
         Plugin.activate(self)
+
+        # Load config for logging
+        self.load_config()
 
         if not msrestazure.tools.is_valid_resource_id(self['resource']):
             self.parser.error('invalid resource ID')
@@ -211,6 +222,42 @@ class NagiosAzureResourceMonitor(Plugin):
                          '{} {} {}'.format(self._metric_properties['name']['localizedValue'],
                                            value,
                                            self._metric_properties['unit'].lower()))
+
+    def load_config(self):
+
+        # Init default conf
+        config = {
+            "logging": {
+                "version": 1,
+                "formatters": {
+                    "simple": {
+                        "format": "%(asctime)s %(levelname)s %(message)s"
+                    }
+                } ,
+                "handlers": {
+                    "console": {
+                        "class": "logging.StreamHandler",
+                        "level": "ERROR",
+                        "formatter": "simple",
+                        "stream": "ext://sys.stdout"
+                    }
+                },
+                "root": {
+                    "level": "DEBUG",
+                    "handlers": ["console"]
+                }
+            }
+        }
+
+        if self.data['verbosity'] == 1 :
+            config["logging"]["handlers"]["console"]["level"] = "WARNING"
+        elif self.data['verbosity'] == 2 :
+            config["logging"]["handlers"]["console"]["level"] = "INFO"
+        elif self.data['verbosity'] == 3 :
+            config["logging"]["handlers"]["console"]["level"] = "DEBUG"
+
+        # Init logging
+        logging.config.dictConfig(config["logging"])
 
 
 if __name__ == '__main__':
