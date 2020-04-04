@@ -86,6 +86,9 @@ class NagiosAzureResourceMonitor(Plugin):
 
         self.add_arg('R', 'resource', 'Azure resource ID')
         self.add_arg('M', 'metric', 'Metric')
+        
+        self.add_arg('a', 'aggregation', 'Aggregation', required=None)
+        self.add_arg('f', 'filter', 'Filter', required=None)
         self.add_arg('D', 'dimension', 'Metric dimension', required=None)
         self.add_arg('V', 'dimension-value', 'Metric dimension value', required=None)
 
@@ -102,6 +105,9 @@ class NagiosAzureResourceMonitor(Plugin):
         if bool(self['dimension']) != bool(self['dimension-value']):
             self.parser.error('--dimension and --dimension-value must be used together')
 
+        if bool(self['filter']) and bool(self['dimension']):
+            self.parser.error('--dimension and --filter are exclusives')
+            
         # Set up Azure Resource Management URL
         if self['host'] is None:
             self['host'] = self.DEFAULT_AZURE_SERVICE_HOST
@@ -139,10 +145,10 @@ class NagiosAzureResourceMonitor(Plugin):
         self._metric_properties = self._get_metric_properties()
 
         dimension_ids = [d['value'] for d in self._metric_properties.get('dimensions', [])]
-        if self._is_dimension_required() and self['dimension'] is None:
+        if self._is_dimension_required() and (self['dimension'] is None and self['filter'] is None):
             self.parser.error(
-                'Dimension required for metric {}. ' \
-                'Supported dimensions are: {}'.format(self['metric'], ', '.join(dimension_ids))
+                'Dimension of Filter required for metric {}. ' \
+                'Supported dimensions/filters are: {}'.format(self['metric'], ', '.join(dimension_ids))
             )
         if self['dimension'] is not None and self['dimension'] not in dimension_ids:
             self.parser.error(
@@ -180,6 +186,11 @@ class NagiosAzureResourceMonitor(Plugin):
         query = {'metricnames': self['metric']}
         if self['dimension'] is not None:
             query['$filter'] = "{} eq '{}'".format(self['dimension'], self['dimension-value'])
+        elif self['filter'] is not None:
+            query['$filter'] = self['filter']
+            
+        if self['aggregation'] is not None:
+            query['aggregation'] = self['aggregation']
 
         path = '{}/providers/Microsoft.Insights/metrics/'.format(self['resource'])
 

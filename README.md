@@ -45,14 +45,6 @@ Note: see [Azure documentation about roles, permissions and security with Azure 
 
 Metric (see https://docs.microsoft.com/en-us/azure/monitoring-and-diagnostics/monitoring-supported-metrics for a list of all metrics available for each resource type)
 
-    -D DIMENSION, --dimension=DIMENSION
-
-Metric dimension
-
-    -V DIMENSION-VALUE, --dimension-value=DIMENSION-VALUE
-
-Metric dimension value
-
     -H HOST, --host=HOST
 
 Alternative Azure Management URL (for Azure national cloud instances like Germany or China)
@@ -71,7 +63,27 @@ Warn Threshhold
 
     -v VERBOSE, --verbose=VERBOSE
 
-verbose Level (2 => Log API Request, 3 => Log also API Response)
+Verbosity Level (2 => Log API Request, 3 => Log also API Response)
+
+    -D DIMENSION, --dimension=DIMENSION
+
+Metric dimension (not compatible with 'filter' parameter)
+
+    -V DIMENSION-VALUE, --dimension-value=DIMENSION-VALUE
+
+Metric dimension value
+
+	-f FILTER, --filter=FILTER
+	
+Allow to filter metric according one or more metric metadata
+ex: If Metric contain metadata A, B and C:
+-f "A eq 'a1' and B eq 'b1' or B eq 'b2' and C eq ''"
+Use also if split is needed with '*'
+-f "A eq 'a1' and B eq 'b1' or B eq 'b2' and C eq '*'"
+
+	-a AGGREGATION, --aggregation
+
+Comma separated list of aggregation to get (average,count,total)
 
 ## Examples
 
