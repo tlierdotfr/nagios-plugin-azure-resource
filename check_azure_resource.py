@@ -14,6 +14,11 @@
 # You should have received a copy of the GNU General Public License along with this program. If not,
 # see <http://www.gnu.org/licenses/>.
 
+#
+# For nagios/centreon threshold possible values, 
+# please see https://nagios-plugins.org/doc/guidelines.html#PLUGOUTPUT
+#
+
 import logging as log
 import logging.config
 
@@ -27,6 +32,7 @@ import msrestazure.tools
 
 from pynag import Plugins
 from pynag.Plugins import simple as Plugin
+from pynag.Plugins import PluginHelper as PluginHelper
 
 from requests.exceptions import HTTPError
 
@@ -67,9 +73,13 @@ class NagiosAzureResourceMonitor(Plugin):
     """Implements functionalities to grab metrics from Azure resource objects."""
 
     DEFAULT_AZURE_SERVICE_HOST = 'management.azure.com'
-    #_AZURE_METRICS_API = '2017-05-01-preview'
     _AZURE_METRICS_API = '2018-01-01'
-    _AZURE_METRICS_UNIT_SYMBOLS = {'Percent': '%', 'Bytes': 'B', 'Seconds': 's'}
+    _AZURE_METRICS_UNIT_SYMBOLS = { 'Percent': '%', 
+                                    'Bytes': 'B',
+                                    'Seconds': 's',
+                                    'MilliSeconds': 'ms',
+                                    'BytesPerSecond': 'B/s',
+                                    'CountPerSecond': '/s'}
 
     def __init__(self, *args, **kwargs):
         Plugin.__init__(self, *args, **kwargs)
@@ -188,62 +198,97 @@ class NagiosAzureResourceMonitor(Plugin):
 
         return self._metric_properties['isDimensionRequired']
 
-    def _get_metric_value(self):
+    def _get_metric_values(self):
         """Get latest metric value available for the Azure resource object."""
 
+        # Prepare Query
         query = {'metricnames': self['metric']}
+        path = '{}/providers/Microsoft.Insights/metrics/'.format(self['resource'])
+
+        # Handling dimension and filters
         if self['dimension'] is not None:
             query['$filter'] = "{} eq '{}'".format(self['dimension'], self['dimension-value'])
         elif self['filter'] is not None:
             query['$filter'] = self['filter']
-            
+        # Handling aggregation    
         if self['aggregation'] is not None:
             query['aggregation'] = self['aggregation']
 
-        path = '{}/providers/Microsoft.Insights/metrics/'.format(self['resource'])
-
+        # Call API
         try:
-            metric_values = _call_arm_rest_api(self._client, path,
+            timeseries = _call_arm_rest_api(self._client, path,
                                                self._AZURE_METRICS_API, query=query,
                                                timeout=self['timeout'])
-            metric_values = metric_values['value'][0]['timeseries']
+            timeseries = timeseries['value'][0]['timeseries']
         except CloudError as ex:
             self.nagios_exit(Plugins.UNKNOWN, ex.message)
 
-        if not metric_values:
+        # Check result
+        if not timeseries:
             return None
 
-        # Get the latest value available
+        # Allow to get correct value according to parameter or primaryAggregationType
         if self['aggregation'] is not None:
             aggregation_type = self['aggregation'].lower()
         else:
             aggregation_type = self._metric_properties['primaryAggregationType'].lower()
-        for value in metric_values[0]['data'][::-1]:
-            if aggregation_type in value:
-                return value[aggregation_type]
+            
+        # Loop on all timeseries in case of data split (according to filter like A eq '*')
+        metric_values = {}
+        for metric_value in timeseries:
+            # Get name of current timeseries or global metric name if only one timeserie available
+            metric_name_ids = [d['value'] for d in metric_value.get('metadatavalues', [])]
+            if len(metric_name_ids) > 0:
+                metric_name = '{}'.format('_'.join(metric_name_ids))
+            else:
+                metric_name = self._metric_properties['name']['value']
+            
+            # Get the latest value available accross timeseries ("::-1" create a teporary reversed list)
+            metric_values[metric_name] = None
+            for value in metric_value['data'][::-1]:
+                if aggregation_type in value:
+                    metric_values[metric_name] = value[aggregation_type]
+                    break;
+        
+        # Return array of metric_values
+        return metric_values
 
     def check_metric(self):
         """Check if the metric value is within the threshold range, and exits with status code,
         message and perfdata.
         """
 
-        value = self._get_metric_value()
-        if value is None:
+        # Get values
+        metric_values = self._get_metric_values()
+        unit = self._AZURE_METRICS_UNIT_SYMBOLS.get(self._metric_properties['unit'])
+        if unit is None:
+            unit = ''
+
+        # Test if value to display
+        if metric_values is None:
             message = 'No value available for metric {}'.format(self['metric'])
             if self['dimension'] is not None:
                 message += ' and dimension {}'.format(self['dimension'])
             self.nagios_exit(Plugins.UNKNOWN, message)
 
-        status = Plugins.check_threshold(value, warning=self['warning'], critical=self['critical'])
+        # PluginHelper of pynag import
+        # https://pynag.readthedocs.io/en/latest/pynag.Plugins.html?highlight=check_threshold#pynag.Plugins.PluginHelper
+        p = PluginHelper()
+        
+        # For each value, declare metric with according thresholds 
+        for metric_idx in metric_values:
+            p.add_metric(label=metric_idx,  value=metric_values[metric_idx], 
+                                            uom=unit,
+                                            warn=self['warning'], crit=self['critical'])
 
-        unit = self._AZURE_METRICS_UNIT_SYMBOLS.get(self._metric_properties['unit'])
-        self.add_perfdata(self._metric_properties['name']['value'], value, uom=unit,
-                          warn=self['warning'], crit=self['critical'])
+        # Test all metrics according to there thresholds
+        p.check_all_metrics()
+        
+        # Add global summary for output
+        p.add_summary(self._metric_properties['name']['localizedValue'])
 
-        self.nagios_exit(status,
-                         '{} {} {}'.format(self._metric_properties['name']['localizedValue'],
-                                           value,
-                                           self._metric_properties['unit'].lower()))
+        # Exit and display plugin output
+        p.exit()
 
     def load_config(self):
 
@@ -273,10 +318,14 @@ class NagiosAzureResourceMonitor(Plugin):
 
         if self.data['verbosity'] == 1 :
             config["logging"]["handlers"]["console"]["level"] = "WARNING"
+            Plugin.verbose = True
         elif self.data['verbosity'] == 2 :
             config["logging"]["handlers"]["console"]["level"] = "INFO"
+            Plugin.verbose = True
         elif self.data['verbosity'] == 3 :
             config["logging"]["handlers"]["console"]["level"] = "DEBUG"
+            Plugin.verbose = True
+            Plugin.show_debug = True
 
         # Init logging
         logging.config.dictConfig(config["logging"])
