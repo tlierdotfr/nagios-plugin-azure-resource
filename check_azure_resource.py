@@ -156,6 +156,14 @@ class NagiosAzureResourceMonitor(Plugin):
                 'Supported dimensions are: {}'.format(self['dimension'], self['metric'],
                                                       ', '.join(dimension_ids))
             )
+            
+        aggregation_ids = self._metric_properties.get('supportedAggregationTypes', [])
+        if self['aggregation'] is not None and self['aggregation'] not in aggregation_ids:
+            self.parser.error(
+                'Unsupported aggregation {} for metric {}. ' \
+                'Supported aggregations are: {}'.format(self['aggregation'], self['metric'],
+                                                        ', '.join(aggregation_ids))
+            )
 
     def _get_metric_definitions(self):
         """Get all available metric definitions for the Azure resource object."""
@@ -205,8 +213,11 @@ class NagiosAzureResourceMonitor(Plugin):
         if not metric_values:
             return None
 
-        aggregation_type = self._metric_properties['primaryAggregationType'].lower()
         # Get the latest value available
+        if self['aggregation'] is not None:
+            aggregation_type = self['aggregation'].lower()
+        else:
+            aggregation_type = self._metric_properties['primaryAggregationType'].lower()
         for value in metric_values[0]['data'][::-1]:
             if aggregation_type in value:
                 return value[aggregation_type]
