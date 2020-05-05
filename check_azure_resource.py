@@ -61,7 +61,8 @@ def _call_arm_rest_api(client, path, api_version, method='GET', body=None, query
 
     try:
         result = response.json()
-    except ValueError:
+    except ValueError as ex:
+        log.warning("_call_arm_rest_api : Failed to convert response to JSON ({0})\n".format(ex.message))
         result = response.text
 
     log.debug("Response : \n{0}\n".format(result))
@@ -222,6 +223,8 @@ class NagiosAzureResourceMonitor(Plugin):
             timeseries = timeseries['value'][0]['timeseries']
         except CloudError as ex:
             self.nagios_exit(Plugins.UNKNOWN, ex.message)
+        except Exception as ex:
+            self.nagios_exit(Plugins.UNKNOWN, "Error wile getting timeseries data from Azure API JSON response (may be not a valid JSON)")
 
         # Check result
         if not timeseries:
